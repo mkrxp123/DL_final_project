@@ -87,7 +87,7 @@ class Experiment:
             
             topn_index = torch.topk(distance, topn, dim=-1, largest=False).indices
             # i-th row (ground image) corresponds to i-th col (satellite image)
-            index = torch.arange(batch_size, device=distance.device)
+            index = torch.arange(batch_size, device=distance.device).reshape(batch_size, -1)
             accuracy = (index == topn_index).any(dim=-1)
             record.append(accuracy.itme())
             

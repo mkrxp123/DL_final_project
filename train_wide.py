@@ -52,7 +52,6 @@ class Experiment:
         # Invert the mask to get non-diagonal elements
         non_diag_mask = ~diag_mask
         # Extract elements using the mask
-        # print(diag_mask)
         positive = similarity[diag_mask]
         negative = similarity[non_diag_mask]
         return positive, negative
@@ -69,8 +68,8 @@ class Experiment:
         return matrix
     
     def extract_feature(self, grd_img, sat_img):
-        _, sat_map = self.sat_backbone.extract_features_multiscale(sat_img)
-        _, grd_map = self.grd_backbone.extract_features_multiscale(grd_img)
+        _, sat_map = self.sat_backbone.extract_features_multiscale(2 * (sat_img / 255.0) - 1.0)
+        _, grd_map = self.grd_backbone.extract_features_multiscale(2 * (grd_img / 255.0) - 1.0)
         # No need to calculate gradients for trained backbone
         sat_feature, grd_feature = self.transformer(sat_map[15].detach(), grd_map[15].detach())
         return sat_feature, grd_feature
@@ -152,6 +151,8 @@ if __name__ == "__main__":
     # parser.add_argument('--config',     type=str, default=root.joinpath("HC_Net/models/config/VIGOR/train-vigor.json"), help="path of config file")
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--epochs',     type=int, default=10)
+    parser.add_argument('--dim',        type=int, default=512, help="feature dim")
+    parser.add_argument('--shared_w',   type=bool, default=False, help="use shared weight for grd/sat")
     parser.add_argument('--lr',         type=float, default=1e-4)
     parser.add_argument('--wdecay',     type=float, default=5e-4)
     parser.add_argument('--epsilon',    type=float, default=1e-7)

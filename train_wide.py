@@ -31,15 +31,19 @@ class Experiment:
         self.weight_path = Path(args.log_dir).joinpath("weight")
         os.makedirs(self.weight_path, exist_ok=True)
     
+    def extract_feature(self, grd_img, sat_img):
+        _, sat_map = self.sat_backbone.extract_features_multiscale(sat_img.to(self.device))[15]
+        _, grd_map = self.grd_backbone.extract_features_multiscale(grd_img.to(self.device))[15]
+        # No need to calculate gradients for trained backbone
+        sat_feature, grd_feature = self.transformer(sat_map.detach(), grd_map.detach())
+        return sat_feature, grd_feature
+    
     @torch.no_grad()
     def eval_epoch(self, val_loader):
         record = []
         for data in tqdm(val_loader, desc="Eval", leave=False, ncols=140):
             grd_img, sat_img, *_ = data
-            _, sat_map = self.sat_backbone.extract_features_multiscale(sat_img.to(self.device))[15]
-            _, grd_map = self.grd_backbone.extract_features_multiscale(grd_img.to(self.device))[15]
-            
-            sat_feature, grd_feature = self.transformer(sat_map, grd_map)
+            sat_feature, grd_feature = self.extract_feature(grd_img.to(self.device), sat_img.to(self.device))
             
             # record.append(???.item())
         return np.mean(record)
@@ -77,11 +81,7 @@ class Experiment:
         for data in tqdm(train_loader, desc="Train", leave=False, ncols=140):
             self.step += 1
             grd_img, sat_img, *_ = data
-            # no need to tune backbone -> don't need gradient
-            _, grd_map = self.grd_backbone.extract_features_multiscale(grd_img.to(self.device))[15].detach()
-            _, sat_map = self.sat_backbone.extract_features_multiscale(sat_img.to(self.device))[15].detach()
-            
-            sat_feature, grd_feature = self.transformer(sat_map, grd_map)
+            sat_feature, grd_feature = self.extract_feature(grd_img.to(self.device), sat_img.to(self.device))
             # loss = ???
             
             self.optimizer.zero_grad()

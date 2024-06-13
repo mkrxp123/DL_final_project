@@ -26,6 +26,7 @@ class Experiment:
         self.transformer = Transformer(args).to(self.device)
         self.optimizer = optim.AdamW(self.transformer.parameters(), lr=args.lr, weight_decay=args.wdecay, eps=args.epsilon)
         
+        self.best = 0
         self.step = 0
         self.writer = SummaryWriter(args.log_dir)
         self.weight_path = Path(args.log_dir).joinpath("weight")
@@ -74,17 +75,21 @@ class Experiment:
         record = []
         for data in tqdm(val_loader, desc="Eval", leave=False, ncols=140):
             grd_img, sat_img, *_ = data
+            batch_size = grd_img.size(0)
             
             sat_feature, grd_feature = self.extract_feature(grd_img.to(self.device), sat_img.to(self.device))
             distance = self.distance(grd_feature, sat_feature)
-            positive, negative = self.extract_pn(distance)
             
-            positive_distance_mean = positive.mean()
-            negative_distance_mean = negative.mean()
-            record.append(positive_distance_mean.item())
+            # positive, negative = self.extract_pn(distance)
+            # positive_distance_mean = positive.mean()
+            # negative_distance_mean = negative.mean()
+            # record.append(positive_distance_mean.item())
             
             topn_index = torch.topk(distance, topn, dim=-1, largest=False).indices
-            
+            # i-th row (ground image) corresponds to i-th col (satellite image)
+            index = torch.arange(batch_size, device=distance.device)
+            accuracy = (index == topn_index).any(dim=-1)
+            record.append(accuracy.itme())
             
         return np.mean(record)
     
@@ -121,11 +126,15 @@ class Experiment:
         
         for epoch in (pbar := tqdm(range(args.epochs), desc="Epochs", leave=False, ncols=140)):
             self.train_epoch(train_loader)
-            metric = self.eval_epoch(val_loader, args.topn)
+            accuracy = self.eval_epoch(val_loader, args.topn)
             
-            # pbar.set_description_str(f"???: {metric}, best: {???}")
-            self.writer.add_scalar("Eval/???", metric, epoch + 1)
             torch.save(self.transformer.state_dict(), self.weight_path.joinpath(f"{epoch:03d}.pt"))
+            if accuracy > self.best:
+                self.best = accuracy
+                torch.save(self.transformer.state_dict(), self.weight_path.joinpath("best.pt"))
+            
+            pbar.set_description_str(f"Acc: {accuracy}, best: {self.best}")
+            self.writer.add_scalar("Eval/Accuracy", accuracy, epoch + 1)
         
 
 if __name__ == "__main__":

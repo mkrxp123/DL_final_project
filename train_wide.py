@@ -36,8 +36,8 @@ class Experiment:
         record = []
         for data in tqdm(val_loader, desc="Eval", leave=False, ncols=140):
             grd_img, sat_img, *_ = data
-            sat_map = self.sat_backbone.extract_features_multiscale(sat_img.to(self.device))[15]
-            grd_map = self.grd_backbone.extract_features_multiscale(grd_img.to(self.device))[15]
+            _, sat_map = self.sat_backbone.extract_features_multiscale(sat_img.to(self.device))[15]
+            _, grd_map = self.grd_backbone.extract_features_multiscale(grd_img.to(self.device))[15]
             
             sat_feature, grd_feature = self.transformer(sat_map, grd_map)
             
@@ -47,7 +47,7 @@ class Experiment:
     @staticmethod
     def extract_pn(distance: torch.Tensor):
         '''
-        A batch=16 of data contains 16 ground/satellite images
+        A batch of data contains #batch ground/satellite images
         Given distance D[i, j] = G[i] - S[j]
         D: [batch, batch]
         G: [batch, dim]
@@ -78,8 +78,8 @@ class Experiment:
             self.step += 1
             grd_img, sat_img, *_ = data
             # no need to tune backbone -> don't need gradient
-            grd_map = self.grd_backbone.extract_features_multiscale(grd_img.to(self.device))[15].detach()
-            sat_map = self.sat_backbone.extract_features_multiscale(sat_img.to(self.device))[15].detach()
+            _, grd_map = self.grd_backbone.extract_features_multiscale(grd_img.to(self.device))[15].detach()
+            _, sat_map = self.sat_backbone.extract_features_multiscale(sat_img.to(self.device))[15].detach()
             
             sat_feature, grd_feature = self.transformer(sat_map, grd_map)
             # loss = ???

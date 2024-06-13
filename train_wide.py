@@ -32,10 +32,10 @@ class Experiment:
         os.makedirs(self.weight_path, exist_ok=True)
     
     def extract_feature(self, grd_img, sat_img):
-        _, sat_map = self.sat_backbone.extract_features_multiscale(sat_img.to(self.device))[15]
-        _, grd_map = self.grd_backbone.extract_features_multiscale(grd_img.to(self.device))[15]
+        _, sat_map = self.sat_backbone.extract_features_multiscale(sat_img)
+        _, grd_map = self.grd_backbone.extract_features_multiscale(grd_img)
         # No need to calculate gradients for trained backbone
-        sat_feature, grd_feature = self.transformer(sat_map.detach(), grd_map.detach())
+        sat_feature, grd_feature = self.transformer(sat_map[15].detach(), grd_map[15].detach())
         return sat_feature, grd_feature
     
     @torch.no_grad()
@@ -116,7 +116,7 @@ if __name__ == "__main__":
     parser.add_argument('--wdecay',     type=float, default=5e-4)
     parser.add_argument('--epsilon',    type=float, default=1e-7)
     parser.add_argument('--ckpt',       type=str, default=root.joinpath("best_checkpoint_same.pth"), help="restore checkpoint")
-    parser.add_argument('--dataset',    type=str, default=root.joinpath(""), help='dataset')    
+    parser.add_argument('--dataset',    type=str, default=root.joinpath("HC_Net/Data/VIGOR"), help='dataset')    
     parser.add_argument('--log-dir',    type=str, default="log", help="tensorboard/weight location")
     
     # parser.add_argument('--model', default=None,help="restore model") 

@@ -76,7 +76,6 @@ class VIGOR(Dataset):
         pona_path = self.pano_list[idx]
         select_ = 0 # random.randint(0,3)
         sat_path = self.pano_label[idx][select_]
-        print(pona_path)
         pano_gps = np.array(pona_path[:-5].split(',')[-2:]).astype(float)
         sat_gps = np.array(sat_path[:-4].split('_')[-2:]).astype(float)
 

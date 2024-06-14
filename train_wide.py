@@ -31,17 +31,23 @@ class Experiment:
         
         self.best = 0
         self.step = 0
-        self.writer = SummaryWriter(args.log_dir)
-        self.weight_path = Path(args.log_dir).joinpath("weight")
-        self.weight_path.mkdir(parents=True, exist_ok=True)
+        if not args.eval:
+            self.writer = SummaryWriter(args.log_dir)
+            self.weight_path = Path(args.log_dir).joinpath("weight")
+            self.weight_path.mkdir(parents=True, exist_ok=True)
         # os.makedirs(self.weight_path, exist_ok=True)
+        
+    def load_weight(self, path):
+        assert Path(path).exists()
+        self.transformer.load_state_dict(torch.load(path, map_location=self.device))
+        print(f"Loaded transformer weight at {path}")
     
     @staticmethod
     def extract_pn(similarity: torch.Tensor):
         '''
         A batch of data contains #batch ground/satellite images
-        Given distance D[i, j] = similarity(G[i], S[j])
-        D: [batch, batch]
+        Given matrix M[i, j] = similarity(G[i], S[j])
+        M: [batch, batch]
         G: [batch, dim]
         S: [batch, dim]
         i-th ground image corresponds to i-th satellite image (diagonal)
@@ -76,6 +82,7 @@ class Experiment:
     
     @torch.no_grad()
     def eval_epoch(self, val_loader, topn=5):
+        self.transformer.eval()
         record = []
         for data in tqdm(val_loader, desc="Eval", leave=False, ncols=140):
             grd_img, sat_img, *_ = data
@@ -102,12 +109,16 @@ class Experiment:
         Distance or Similarity
         '''
         positive, negative = self.extract_pn(matrix)
-        p_term = torch.mean(torch.log(torch.exp(1 + -self.alpha_p * (positive - 0.6)))) / self.alpha_p
-        n_term = torch.mean(torch.log(torch.exp(1 + self.alpha_n * (negative - 0)))) / self.alpha_n
-        loss = p_term + n_term
+        p_term = torch.mean(torch.exp(positive))
+        n_term = torch.mean(torch.exp(negative))
+        loss = -torch.log(1 + p_term / n_term)
+        # p_term = torch.mean(torch.log(1 + torch.exp(-self.alpha_p * (positive - 0.7)))) / self.alpha_p
+        # n_term = torch.mean(torch.log(1 + torch.exp(self.alpha_n * (negative - 0)))) / self.alpha_n
+        # loss = p_term + n_term
         return loss
     
     def train_epoch(self, train_loader):
+        self.transformer.train()
         for data in (pbar := tqdm(train_loader, desc="Train", leave=False, ncols=140)):
             self.step += 1
             grd_img, sat_img, *_ = data
@@ -130,7 +141,7 @@ class Experiment:
         train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
         
-        for epoch in (pbar := tqdm(range(args.epochs), desc="Epochs", leave=False, ncols=140)):
+        for epoch in (pbar := tqdm(range(args.epochs), desc="Epochs", leave=True, ncols=140)):
             self.train_epoch(train_loader)
             accuracy = self.eval_epoch(val_loader, args.topn)
             
@@ -140,28 +151,32 @@ class Experiment:
                 torch.save(self.transformer.state_dict(), self.weight_path.joinpath("best.pt"))
             
             self.writer.add_scalar("Eval/Accuracy", accuracy, epoch + 1)
-            pbar.set_description_str(f"Acc: {accuracy}, best: {self.best}")
+            pbar.set_postfix_str(f"Acc: {accuracy:.3f}, best: {self.best:3f}")
         
 
 if __name__ == "__main__":
     root = Path(__file__).parent
     parser = argparse.ArgumentParser()
     
+    parser.add_argument('--eval',       default=False, action='store_true', help="evaluate/train")
+    parser.add_argument('--weight',     type=str, default=root.joinpath("weight/Siamese.pt"), help="transformer weight")
     parser.add_argument('--device',     type=str, default="cuda:2", help="GPU")
     # parser.add_argument('--config',     type=str, default=root.joinpath("HC_Net/models/config/VIGOR/train-vigor.json"), help="path of config file")
     parser.add_argument('--batch_size', type=int, default=16)
-    parser.add_argument('--epochs',     type=int, default=10)
-    parser.add_argument('--dim',        type=int, default=512, help="feature dim")
+    parser.add_argument('--epochs',     type=int, default=30)
+    parser.add_argument('--conv_k',     type=int, default=3, help="convolution output kernel")
+    parser.add_argument('--conv_c',     type=int, default=256, help="convolution output channel")
+    parser.add_argument('--dim',        type=int, default=1024, help="feature dim")
     parser.add_argument('--shared_w',   type=bool, default=False, help="use shared weight for grd/sat")
     parser.add_argument('--lr',         type=float, default=1e-4)
     parser.add_argument('--wdecay',     type=float, default=5e-4)
     parser.add_argument('--epsilon',    type=float, default=1e-7)
     parser.add_argument('--topn',       type=int, default=5)
-    parser.add_argument('--alpha_p',    type=float, default=10)
-    parser.add_argument('--alpha_n',    type=float, default=1)
-    parser.add_argument('--ckpt',       type=str, default=root.joinpath("best_checkpoint_same.pth"), help="restore checkpoint")
+    parser.add_argument('--alpha_p',    type=float, default=5)
+    parser.add_argument('--alpha_n',    type=float, default=20)
+    parser.add_argument('--ckpt',       type=str, default=root.joinpath("best_checkpoint_same.pth"), help="HC-Net weight")
     parser.add_argument('--dataset',    type=str, default=root.joinpath("HC_Net/Data/VIGOR"), help='dataset')    
-    parser.add_argument('--log-dir',    type=str, default="log", help="tensorboard/weight location")
+    parser.add_argument('--log-dir',    type=str, default="log/test", help="tensorboard/weight location")
     
     # parser.add_argument('--model', default=None,help="restore model") 
     parser.add_argument('--iters_lev0', type=int, default=6)
@@ -182,8 +197,14 @@ if __name__ == "__main__":
     parser.add_argument('--zoom', type=int, default=20)
     
     args = parser.parse_args()
-    # args = fetch_config(args)
+    
     experiment = Experiment(args)
     
-    experiment.train(args)
+    if args.eval:
+        experiment.load_weight(args.weight)
+        test_loader = fetch_dataset(args, "eval", args.dataset)
+        accuracy = experiment.eval_epoch(test_loader, args.topn)
+        print(f"Accuracy: {accuracy}")
+    else:
+        experiment.train(args)
     

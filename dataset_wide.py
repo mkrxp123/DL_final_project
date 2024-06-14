@@ -137,7 +137,6 @@ def fetch_dataset(args, split='train', root=Path(__file__).parent.joinpath("HC_N
         return train_dataset, val_dataset
     else:
         nw = min([os.cpu_count(), args.batch_size if args.batch_size > 1 else 0, 8])  # number of workers
-        print('Using {} dataloader workers every process'.format(nw)) 
-        test_loader = data.DataLoader(train_dataset, batch_size=args.batch_size,
-                                        pin_memory=True, shuffle=True, num_workers=nw, drop_last=False)    
+        # print('Using {} dataloader workers every process'.format(nw)) 
+        test_loader = data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)    
         return test_loader

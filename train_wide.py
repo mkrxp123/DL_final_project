@@ -1,4 +1,6 @@
 import os
+import sys
+sys.path.append('HC_Net')
 import argparse
 import numpy as np
 from pathlib import Path
@@ -11,6 +13,7 @@ from HC_Net.models.network import HCNet
 from dataset_wide import fetch_dataset
 from model_wide import Transformer
 from utility import fetch_config, load_model
+import torch.nn.functional as F
 
 class Experiment:
     def __init__(self, args):
@@ -30,6 +33,7 @@ class Experiment:
         self.step = 0
         self.writer = SummaryWriter(args.log_dir)
         self.weight_path = Path(args.log_dir).joinpath("weight")
+        self.batch_size = args.batch_size
         # self.weight_path.mkdir(parents=True, exist_ok=True)
         os.makedirs(self.weight_path, exist_ok=True)
     
@@ -59,13 +63,15 @@ class Experiment:
         grd: [batch, dim]
         sat: [batch, dim]
         '''
+        grd = F.normalize(grd, p=2, dim=-1)
+        sat = F.normalize(sat, p=2, dim=-1)
         diff = grd[:, None, :] - sat[None, :, :]
         dist = torch.sqrt(torch.sum(diff ** 2, dim=-1))
         return dist
     
     def extract_feature(self, grd_img, sat_img):
-        _, sat_map = self.sat_backbone.extract_features_multiscale(sat_img)
-        _, grd_map = self.grd_backbone.extract_features_multiscale(grd_img)
+        _, sat_map = self.sat_backbone.extract_features_multiscale(2 * (sat_img / 255.0) - 1.0)
+        _, grd_map = self.grd_backbone.extract_features_multiscale(2 * (grd_img / 255.0) - 1.0)
         # No need to calculate gradients for trained backbone
         sat_feature, grd_feature = self.transformer(sat_map[15].detach(), grd_map[15].detach())
         return sat_feature, grd_feature
@@ -73,23 +79,18 @@ class Experiment:
     @torch.no_grad()
     def eval_epoch(self, val_loader, topn=5):
         record = []
-        for data in tqdm(val_loader, desc="Eval", leave=False, ncols=140):
+        for data in tqdm(val_loader, desc="Eval", leave=True, position=0, ncols=90):
             grd_img, sat_img, *_ = data
             batch_size = grd_img.size(0)
             
             sat_feature, grd_feature = self.extract_feature(grd_img.to(self.device), sat_img.to(self.device))
             distance = self.distance(grd_feature, sat_feature)
             
-            # positive, negative = self.extract_pn(distance)
-            # positive_distance_mean = positive.mean()
-            # negative_distance_mean = negative.mean()
-            # record.append(positive_distance_mean.item())
-            
             topn_index = torch.topk(distance, topn, dim=-1, largest=False).indices
             # i-th row (ground image) corresponds to i-th col (satellite image)
             index = torch.arange(batch_size, device=distance.device).reshape(batch_size, -1)
             accuracy = (index == topn_index).any(dim=-1)
-            record.append(accuracy.itme())
+            record.append(accuracy.sum().item()/batch_size)
             
         return np.mean(record)
     
@@ -99,11 +100,19 @@ class Experiment:
         negative: [batch*(batch-1)]
         '''
         # triplet loss
-        loss = torch.clamp(positive - negative + 1, min=0).mean()
+        # loss = torch.clamp(positive - negative + 1, min=0).mean()
+        # Weighted Soft-Margin Ranking Loss
+        loss_weight = 10
+        loss = 0
+        b_1 = self.batch_size - 1
+        for i in range(self.batch_size):
+            d = (positive[i] - torch.mean(negative[i*b_1:(i+1)*b_1]))
+            loss += torch.log(1 + torch.exp(loss_weight * d))
+
         return loss
     
     def train_epoch(self, train_loader):
-        for data in tqdm(train_loader, desc="Train", leave=False, ncols=140):
+        for data in (pbar := tqdm(train_loader, desc="Train", leave=True, position=0, ncols=90)):
             self.step += 1
             grd_img, sat_img, *_ = data
             
@@ -115,7 +124,7 @@ class Experiment:
             loss = self.loss_fn(positive, negative)
             loss.backward()
             self.optimizer.step()
-            
+            pbar.set_postfix(loss=loss.item())
             self.writer.add_scalar("Train/loss", loss.item(), self.step)
         # self.scheduler.step()
     
@@ -124,7 +133,7 @@ class Experiment:
         train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
         
-        for epoch in (pbar := tqdm(range(args.epochs), desc="Epochs", leave=False, ncols=140)):
+        for epoch in (pbar := tqdm(range(args.epochs), desc="Epochs", leave=True, position=0, ncols=90)):
             self.train_epoch(train_loader)
             accuracy = self.eval_epoch(val_loader, args.topn)
             
@@ -133,24 +142,27 @@ class Experiment:
                 self.best = accuracy
                 torch.save(self.transformer.state_dict(), self.weight_path.joinpath("best.pt"))
             
-            pbar.set_description_str(f"Acc: {accuracy}, best: {self.best}")
+            print(f"Epoch : {epoch} => Acc: {accuracy}, best: {self.best}")
             self.writer.add_scalar("Eval/Accuracy", accuracy, epoch + 1)
+
+    def load(self, path):
+        self.transformer.load_state_dict(torch.load(path))
         
 
 if __name__ == "__main__":
     root = Path(__file__).parent
     parser = argparse.ArgumentParser()
     
-    parser.add_argument('--device',     type=str, default="cuda:2", help="GPU")
+    parser.add_argument('--device',     type=str, default="cuda", help="GPU")
     # parser.add_argument('--config',     type=str, default=root.joinpath("HC_Net/models/config/VIGOR/train-vigor.json"), help="path of config file")
     parser.add_argument('--batch_size', type=int, default=16)
-    parser.add_argument('--epochs',     type=int, default=10)
+    parser.add_argument('--epochs',     type=int, default=200)
     parser.add_argument('--lr',         type=float, default=1e-4)
     parser.add_argument('--wdecay',     type=float, default=5e-4)
     parser.add_argument('--epsilon',    type=float, default=1e-7)
     parser.add_argument('--topn',       type=int, default=5)
     parser.add_argument('--ckpt',       type=str, default=root.joinpath("best_checkpoint_same.pth"), help="restore checkpoint")
-    parser.add_argument('--dataset',    type=str, default=root.joinpath("HC_Net/Data/VIGOR"), help='dataset')    
+    parser.add_argument('--dataset',    type=str, default=root.joinpath("HC_Net/VIGOR"), help='dataset')    
     parser.add_argument('--log-dir',    type=str, default="log", help="tensorboard/weight location")
     
     # parser.add_argument('--model', default=None,help="restore model") 
@@ -170,10 +182,17 @@ if __name__ == "__main__":
     parser.add_argument('--image_size', type=int, default=512)
     parser.add_argument('--sat_size', type=int, default=640)
     parser.add_argument('--zoom', type=int, default=20)
+    parser.add_argument('--gpuid', type=list, default=[0])
     
     args = parser.parse_args()
     # args = fetch_config(args)
     experiment = Experiment(args)
-    
     # experiment.train(args)
-    
+
+    experiment.load("log/weight/best.pt")
+    train_dataset, val_dataset = fetch_dataset(args, "train", args.dataset)
+    # train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=64, shuffle=True)
+
+    accuracy = experiment.eval_epoch(val_loader, 3)
+    print(f'Accuracy: {accuracy}')

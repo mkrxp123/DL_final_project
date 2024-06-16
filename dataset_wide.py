@@ -130,7 +130,7 @@ def fetch_dataset(args, split='train', root=Path(__file__).parent.joinpath("HC_N
     print('Training with %d image pairs' % len(train_dataset))
 
     if split == 'train':
-        train_size = int(0.8 * len(train_dataset))
+        train_size = int(1.0 * len(train_dataset))
         val_size = len(train_dataset) - train_size
         train_dataset, val_dataset = random_split(train_dataset, [train_size, val_size])
         print("using {} images for training, {} images for validation.".format(train_size, val_size))

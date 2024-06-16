@@ -78,6 +78,7 @@ class Experiment:
     
     @torch.no_grad()
     def eval_epoch(self, val_loader, topn=5):
+        self.transformer.eval()
         record = []
         for data in tqdm(val_loader, desc="Eval", leave=True, position=0, ncols=90):
             grd_img, sat_img, *_ = data
@@ -112,6 +113,7 @@ class Experiment:
         return loss
     
     def train_epoch(self, train_loader):
+        self.transformer.train()
         for data in (pbar := tqdm(train_loader, desc="Train", leave=True, position=0, ncols=90)):
             self.step += 1
             grd_img, sat_img, *_ = data
@@ -156,14 +158,18 @@ if __name__ == "__main__":
     parser.add_argument('--device',     type=str, default="cuda", help="GPU")
     # parser.add_argument('--config',     type=str, default=root.joinpath("HC_Net/models/config/VIGOR/train-vigor.json"), help="path of config file")
     parser.add_argument('--batch_size', type=int, default=16)
-    parser.add_argument('--epochs',     type=int, default=200)
+    parser.add_argument('--epochs',     type=int, default=100)
+    parser.add_argument('--conv_k',     type=int, default=3, help="convolution output kernel")
+    parser.add_argument('--conv_c',     type=int, default=256, help="convolution output channel")
+    parser.add_argument('--dim',        type=int, default=1024, help="feature dim")
+    parser.add_argument('--shared_w',   type=bool, default=False, help="use shared weight for grd/sat")
     parser.add_argument('--lr',         type=float, default=1e-4)
     parser.add_argument('--wdecay',     type=float, default=5e-4)
     parser.add_argument('--epsilon',    type=float, default=1e-7)
     parser.add_argument('--topn',       type=int, default=5)
     parser.add_argument('--ckpt',       type=str, default=root.joinpath("best_checkpoint_same.pth"), help="restore checkpoint")
     parser.add_argument('--dataset',    type=str, default=root.joinpath("HC_Net/VIGOR"), help='dataset')    
-    parser.add_argument('--log-dir',    type=str, default="log", help="tensorboard/weight location")
+    parser.add_argument('--log-dir',    type=str, default="log/test", help="tensorboard/weight location")
     
     # parser.add_argument('--model', default=None,help="restore model") 
     parser.add_argument('--iters_lev0', type=int, default=6)
@@ -189,10 +195,10 @@ if __name__ == "__main__":
     experiment = Experiment(args)
     # experiment.train(args)
 
-    experiment.load("log/weight/best.pt")
-    train_dataset, val_dataset = fetch_dataset(args, "train", args.dataset)
+    experiment.load("log/test/weight/best.pt")
+    val_loader = fetch_dataset(args, "val", args.dataset)
     # train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=64, shuffle=True)
+    # val_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 
-    accuracy = experiment.eval_epoch(val_loader, 3)
-    print(f'Accuracy: {accuracy}')
+    accuracy = experiment.eval_epoch(val_loader, args.topn)
+    print(f'Accuracy : {accuracy}')

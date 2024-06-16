@@ -88,6 +88,7 @@ class Experiment:
             distance = self.distance(grd_feature, sat_feature)
             
             topn_index = torch.topk(distance, topn, dim=-1, largest=False).indices
+
             # i-th row (ground image) corresponds to i-th col (satellite image)
             index = torch.arange(batch_size, device=distance.device).reshape(batch_size, -1)
             accuracy = (index == topn_index).any(dim=-1)
@@ -157,7 +158,7 @@ if __name__ == "__main__":
     
     parser.add_argument('--device',     type=str, default="cuda", help="GPU")
     # parser.add_argument('--config',     type=str, default=root.joinpath("HC_Net/models/config/VIGOR/train-vigor.json"), help="path of config file")
-    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--epochs',     type=int, default=100)
     parser.add_argument('--conv_k',     type=int, default=3, help="convolution output kernel")
     parser.add_argument('--conv_c',     type=int, default=256, help="convolution output channel")
@@ -166,7 +167,7 @@ if __name__ == "__main__":
     parser.add_argument('--lr',         type=float, default=1e-4)
     parser.add_argument('--wdecay',     type=float, default=5e-4)
     parser.add_argument('--epsilon',    type=float, default=1e-7)
-    parser.add_argument('--topn',       type=int, default=5)
+    parser.add_argument('--topn',       type=int, default=1)
     parser.add_argument('--ckpt',       type=str, default=root.joinpath("best_checkpoint_same.pth"), help="restore checkpoint")
     parser.add_argument('--dataset',    type=str, default=root.joinpath("HC_Net/VIGOR"), help='dataset')    
     parser.add_argument('--log-dir',    type=str, default="log/test", help="tensorboard/weight location")
